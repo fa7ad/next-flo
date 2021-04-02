@@ -1,3 +1,4 @@
+import jwt from "jsonwebtoken";
 import NextAuth from "next-auth";
 import Providers from "next-auth/providers";
 
@@ -30,8 +31,27 @@ export default NextAuth({
     // encryption: true,
     // You can define your own encode/decode functions for signing and encryption
     // if you want to override the default behaviour.
-    // encode: async ({ secret, token, maxAge }) => {},
-    // decode: async ({ secret, token, maxAge }) => {},
+    encode: async ({ secret, token, maxAge }) => {
+      const jwtClaims = {
+        sub: token.id.toString(),
+        name: token.name,
+        email: token.email,
+        iat: Date.now() / 1e3,
+        exp: Math.floor(Date.now() / 1e3) + 7 * 24 * 60 * 60,
+        "https://hasura.io/jwt/claims": {
+          "x-hasura-allowed-roles": ["user"],
+          "x-hasura-default-role": "user",
+          "x-hasura-role": "user",
+          "x-hasura-user-id": token.id,
+        },
+      };
+      const encodedToken = jwt.sign(jwtClaims, secret, { algorithm: "HS256" });
+      return encodedToken;
+    },
+    decode: async ({ secret, token, maxAge }) => {
+      const decodedToken = jwt.verify(token, secret, { algorithms: ["HS256"] });
+      return decodedToken;
+    },
   },
 
   pages: {
@@ -45,8 +65,24 @@ export default NextAuth({
   callbacks: {
     // async signIn(user, account, profile) { return true },
     // async redirect(url, baseUrl) { return baseUrl },
-    // async session(session, user) { return session },
-    // async jwt(token, user, account, profile, isNewUser) { return token }
+    async session(session, token) {
+      const encodedToken = jwt.sign(token, process.env.SECRET, {
+        algorithm: "HS256",
+      });
+      session.id = token.id;
+      session.token = encodedToken;
+      return Promise.resolve(session);
+    },
+    async jwt(token, user, account, profile, isNewUser) { 
+      const isUserSignedIn = !!user;
+      
+      // FIXME: if new user add to DB
+      
+      if(isUserSignedIn) {
+        token.id = user.id.toString();
+      }
+      return Promise.resolve(token);
+    }
   },
 
   // Events are useful for logging
